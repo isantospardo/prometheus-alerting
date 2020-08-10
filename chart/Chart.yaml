@@ -1,0 +1,14 @@
+apiVersion: v2
+name: custom-prometheus-rules
+description: Chart to add custom prometheus rules
+version: 0.1.0
+icon: https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/OpenShift-LogoType.svg/1200px-OpenShift-LogoType.svg.png
+keywords:
+- openshift
+- okd4
+- prometheus
+- prometheusrule
+- openshift-monitoring
+maintainers:
+- name: CERN IT-CDA-WF
+  email: openshift-admins@cern.ch

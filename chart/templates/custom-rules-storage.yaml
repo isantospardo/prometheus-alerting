@@ -1,0 +1,93 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  creationTimestamp: null
+  labels:
+    role: alert-rules
+  name: prometheus-cern-rules-storage
+  namespace: openshift-monitoring
+spec:
+  groups:
+  - name: custom-cern-storage.rules
+    rules:
+    - alert: TooManyReleasedVolumes
+      # Consider we have an issue if more than 25% of the cephfs PVs are Released (i.e. unused),
+      # ignoring other storage classes (eos/cvmfs volumes aren't an issue since they don't
+      # use any resource outside the Openshift cluster, NFS is phased out)
+      expr: count(kube_persistentvolume_status_phase{phase="Released"} == 1 AND ON(persistentvolume)
+        kube_persistentvolume_info{storageclass=~"cephfs.*"}) / count(kube_persistentvolume_info{storageclass=~"cephfs.*"}) > 0.25
+      for: 15m
+      labels:
+        severity: critical
+      annotations:
+        summary: Large number of Released volumes. Something is probably creating/deleting volumes in a loop.
+        description: Large number of Released volumes. Something is probably creating/deleting volumes
+          in a loop. Action must be taken immediately as large number of unused volumes can very negatively affect
+          the storage system (cf. INC1973961).
+        recovery_action: >
+          Use `oc get pv` to identify the application creating PVCs in a loop. One namespace should be associated
+          with many PVs in Released state and is the culprit for the PVC creation loop.
+
+          Most likely the cause will be a ServiceInstance (request to provision a template or APB from the catalog)
+          that fails provisioning and tries again in a loop. Find it with `oc get serviceinstance -n <culprit_namespace>`
+          and delete the ServiceInstance that fails provisioning (status `OrphanMitigation` or `OrphanMitigationSuccessful`).
+
+          In case it is not possible to stop the PVC creation loop, one may consider stopping NFS PV provisioning
+          altogether (this will affect other applications as well of course until this is repaired) but may still be
+          preferable to overloading the storage system. e.g. `oc scale dc/volume-provisioner --replicas=0 -n paas-app-manager`
+          (`paas-app-manager-dev` for dev cluster)
+
+          Released PVs will be GC'ed after some time (7 days in dev, 30 days in prod) by a nightly cronjob. To speed up reclaiming
+          unused volumes, use `oc annotate --overwrite pv <pv_name> cern.ch/volume-reclaim-deletion-timestamp=2019-01-01T00:00:00Z`
+          to make sure the next run of the cronjob will delete the volumes.
+
+    ## Storage alarms
+    ## Detection of PVs not backed up
+    ## We want to raise an alarm only in case backup fails multiple times in a row
+    - alert: CephfsVolumeLastBackupOld
+      # this checks if the last backup is older than 2 days. With this we make sure that the backup failed as it could give false positives
+      # as one backup could be the first to fail in the first round and the last one to fail in the second round. The cronjob runs every 24h
+      expr: cephfs_volume_last_backup{status="backup_succeeded"} < time() - 86400*2 and ON(persistentvolume) kube_persistentvolume_labels{label_backup_cephfs_volumes_cern_ch_backup = "true"}
+      for: 1d
+      labels:
+        severity: important
+      annotations:
+        description: Last backup of the persistent volume {{`{{ $labels.persistentvolume }}`}} was on {{`{{ $value }}`}} seconds and is older than two days. The PVs are backed up once a day.
+        recovery_action: >
+          1. check the annotations of the PV `oc describe pv/{{`{{ $labels.persistentvolume }}`}}` to see when was the last backup.
+          2. check the logs of the pod who did the last backup `oc logs pod/<pv_annotation_pod> -n paas-infra-cephfs`, the name of the pod can be found in the annotations of the PV.
+          3. check the troubleshooting guide described in https://gitlab.cern.ch/paas-tools/storage/backup-cephfs-volumes#troubleshooting for further actions.
+        summary: Last backup of the persistent volume {{`{{ $labels.persistentvolume }}`}} was on {{`{{ $value }}`}} seconds (use `date -d @{{`{{ $value }}`}}` for human-readable) and is older than two days.
+
+    ## Detection of restic forget backup of the PVs not running healthy
+    ## We want to raise an alarm only in case forget backup fails multiple times in a row
+    - alert: CephfsVolumeLastBackupForgetOld
+      # this checks if the last restic forget backup is older than 15 days. With this we make sure that the restic forget backup failed twice as it could give false positives
+      # as one restic forget backup could be the first to fail in the first round and the last one to fail in the second round. The cronjob runs every weekend
+      expr: cephfs_volume_last_backup_forget{status="backup_forget_succeeded"} < time() - 86400*15 and ON(persistentvolume) kube_persistentvolume_labels{label_backup_cephfs_volumes_cern_ch_backup = "true"}
+      for: 1d
+      labels:
+        severity: important
+      annotations:
+        description: Last restic forget backups of the persistent volume {{`{{ $labels.persistentvolume }}`}} was on {{`{{ $value }}`}} seconds and is older than 15 days. The restic forget backups of the PVs run every weekend.
+        recovery_action: >
+          1. check the annotations of the PV `oc describe pv/{{`{{ $labels.persistentvolume }}`}}` to see when was the last restic forget backup.
+          2. check the logs of the pod who did the last forget backup `oc logs pod/<pv_annotation_pod> -n paas-infra-cephfs`, the name of the pod can be found in the annotations of the PV.
+          3. check the troubleshooting guide described in https://gitlab.cern.ch/paas-tools/storage/backup-cephfs-volumes#troubleshooting for further actions.
+        summary: Last restic forget backup of the persistent volume {{`{{ $labels.persistentvolume }}`}} was on {{`{{ $value }}`}} seconds (use `date -d @{{`{{ $value }}`}}` for human-readable) and is older than 15 days.
+
+    ## Detection of restic check of the PVs not running healthy
+    ## We want to raise an alarm only in case there is a corruption of the restic repo
+    - alert: CephfsVolumeLastBackupCheckOld
+      # this checks if the last restic check has data corruption and is older than 8 days. The cronjob runs every weekend.
+      expr: cephfs_volume_last_backup_check{status="backup_check_succeeded"} < time() - 86400*8 and ON(persistentvolume) kube_persistentvolume_labels{label_backup_cephfs_volumes_cern_ch_backup = "true"}
+      for: 1d
+      labels:
+        severity: important
+      annotations:
+        description: Last restic check of the persistent volume {{`{{ $labels.persistentvolume }}`}} was on {{`{{ $value }}`}} seconds and is older than 8 days. There is a corruption of the restic repo.
+        recovery_action: >
+          1. check the annotations of the PV `oc describe pv/{{`{{ $labels.persistentvolume }}`}}` to see when was the last forget backup.
+          2. check the logs of the pod who did the last forget backup `oc logs pod/<pv_annotation_pod> -n paas-infra-cephfs`, the name of the pod can be found in the annotations of the PV.
+          3. check the troubleshooting guide described in https://gitlab.cern.ch/paas-tools/storage/backup-cephfs-volumes#troubleshooting for further actions.
+        summary: There is a corruption of the restic repo. Last restic check of the persistent volume {{`{{ $labels.persistentvolume }}`}} was on {{`{{ $value }}`}} seconds (use `date -d @{{`{{ $value }}`}}` for human-readable) and is older than 8 days.

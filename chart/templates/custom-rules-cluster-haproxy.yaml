@@ -1,0 +1,28 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  creationTimestamp: null
+  labels:
+    role: alert-rules
+  name: prometheus-cern-rules-haproxy
+  namespace: openshift-monitoring
+spec:
+  groups:
+  - name: custom-cern-haproxy.rules
+    rules:
+    ## Due to the new dynamic reload of HAProxy routers added in OpenShift 3.11 (see CIPAAS-435)
+    ## there is no need anymore to worry about user applications restarting affecting the router.
+    ## However, we still want to be notified when one of our applications restart often (applications
+    ## in namespaces starting with `openshift-` or `paas-` as well as the `default` namespace).
+    - alert: PodRestartingTooOften
+      expr:  rate(kube_pod_container_status_restarts{namespace=~"default|paas-.+|openshift-.+"}[1h]) * 3600 > 5
+      for: 1d
+      labels:
+        severity: important
+      annotations:
+        description: '{{`{{ $labels.pod}}`}} in {{`{{ $labels.namespace}}`}} is restarting too often.
+          Please investigate the reason why is happening'
+        recovery_action: 'The pod should not be restarting. Identify in the application logs why it is happening and correct it'
+        summary: '{{`{{ $labels.pod}}`}} in {{`{{ $labels.namespace}}`}} is restarting too often'
+
+  

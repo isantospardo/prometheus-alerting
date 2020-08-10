@@ -1,0 +1,99 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  creationTimestamp: null
+  labels:
+    role: alert-rules
+  name: prometheus-cern-rules-cluster-health
+  namespace: openshift-monitoring
+spec:
+  groups:
+  - name: custom-cern-cluster-health.rules
+    rules:
+    ## Cluster health issues so we know when something is probably wrong with nodes
+    - alert: NodeCannotStartOrTerminatePods
+      expr: (count(kube_pod_info and ON(pod) (kube_pod_container_status_waiting_reason{reason="ContainerCreating"}
+        == 1)) BY (node) or ON(node) (count(kube_pod_info and ON(pod, namespace) (kube_pod_status_phase{phase="Running"}
+        > 0) and ON(pod, namespace) (kube_pod_container_status_terminated > 0)) BY (node)))
+        / (count(kube_pod_info and ON(pod) (kube_pod_status_phase{phase="Running"} ==
+        1)) BY (node) + 1) > 0.1
+      for: 30m
+      labels:
+        severity: important
+      annotations:
+        description: The affected node ({{`{{ $labels.node }}`}}) needs to be checked for
+          pods in CreatingContainer and Terminating state. Check the node to find out
+          the pods affected and decide if it is an infrastructure problem or merely
+          bad configuration from users'
+        recovery_action: >
+          1. Detect the affected pods by running `oc adm manage-node
+          --list-pods {{`{{ $labels.node }}`}}
+
+          2. Understand why the pod is in this state
+          (e.g. a volume fails to be (un)mounted, etc.) by checking the events on its namespace
+          and/or the logs of `origin-node` directly in {{`{{ $labels.node }}`}}.
+
+          3. If it looks like an infrastructure problem, check root cause (problems mounting
+          volumes, an issue with the docker and/or openshift version, etc.). Eventually
+          reboot the node to try to recover
+
+          4. Pods stuck in deleting state can be removed from the pod list with
+          `oc delete --force --grace-period=0`. The node will keep trying to delete
+          local resources (typically volume that cannot be unmounted) but pod won't
+          appear in pod list anymore.
+        summary: '{{`{{ $labels.node }}`}} has more than 10% of it is running pods failing
+          to start or to terminate'
+
+    - alert: NodesInNotReadyState
+      expr: count(kube_node_labels  and on (node) kube_node_status_condition{condition="Ready",status="true"} == 1) by (label_role)
+        / count(kube_node_labels and on (node) kube_node_status_condition{condition="Ready"} == 1) by (label_role) <= 0.9
+      for: 30m
+      labels:
+        severity: important
+      annotations:
+        description: There are less than 90% of total nodes of role {{`{{ $labels.label_role }}`}} in Ready state. This means
+          the cluster is degraded and nodes in this state need to be either recovered or replaced.
+        recovery_action: >
+          1. Look up which nodes are in NotReady state by running `oc get nodes`
+
+          2. Understand why the node is in NotReady state. Try to ssh to the server and check the
+          `origin-node` logs (ie journalctl -u origin-node -f) to see what is causing the NotReady
+          alerts. In some instances, when a master is down origin-node does not detect that it lost connection
+          with its master; restarting the `origin-node` service solves the problem
+
+          3. Reboot node if it is not clear what is going wrong.
+
+          4. If ater a reboot the node is still broken, just cordon it and replace it by a new one
+          (ref. https://espace.cern.ch/openshift-internal/_layouts/15/WopiFrame.aspx?sourcedoc=%2Fopenshift%2Dinternal%2FShared%20Documents%2FOpenshift&wd=target%28%2F%2FOperations.one%7Cea9ca79c-7463-4279-8987-adf5800c34c1%2FAdd%5C%2FRemove%20nodes%7C9d4a5aef-baab-4fb3-b54a-5ccfe4e17387%2F%29)
+        summary: The role {{`{{ $labels.label_role }}`}} is degraded as less than 90% of these nodes are in Ready
+          state.
+
+    - alert: EosdIsUsingTooMuchMemory
+      expr: sum(container_memory_usage_bytes{id="/system.slice/eosd.service"}) by (instance) > 4*1024*1024*1024
+      for: 30m
+      labels:
+        severity: important
+      annotations:
+        description: The eosd process running in {{`{{ $labels.instance }}`}} is using more than 4GB of memory.
+          This is more than the reserved amount for this process, so this should not happen.
+        recovery_action: >
+          1. Connect to {{`{{ $labels.instance }}`}} and check if there are containers accessing EOS.
+          2. Analyze why EOS is using that much memory and if it is freeing up memory.
+          In the past, we have seen EOS memory leaks cause memory starvation. Contact EOS support is necessary.
+          3. Restart EOS on the node to free memory with `systemctl restart eosd`
+        summary: The eosd process running in {{`{{ $labels.instance }}`}} is using more than 4Gb of memory.
+
+    - alert: NodeStoppedPostingStatus
+      expr: count(kube_node_status_condition{condition="Ready",status="unknown"} == 1) by (node)
+      for: 0s # Trigger the alert immediately
+      labels:
+        # the alert for humans are nodes_in_not_ready_state if a significant fraction of nodes start being NotReady,
+        # openshift_standard_nodes_allocatable_* if too many nodes are NotReady to keep scheduling all apps.
+        severity: automated_recovery_attempt
+      annotations:
+        description: "{{`{{ $labels.node }}`}} stopped posting its status to the master. Possibly origin-node is broken
+          or did not detect it has been disconnected from its master, and simply needs to be restarted to recover the node.
+          But this must be done very quickly before pods are evacuated from the NotReady node and restarted elsewhere."
+        recovery_action: Run "systemctl restart origin-node" in {{`{{ $labels.node }}`}}.
+          This should be done programatically with an Ansible playbook.
+        summary: "{{`{{ $labels.node }}`}} is in NotReady state"
