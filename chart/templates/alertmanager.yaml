@@ -1,0 +1,33 @@
+# Configuration file for alertmanager
+global:
+  resolve_timeout: 5m
+
+# The root route on which each incoming alert enters.
+# The root route with all parameters, which are inherited by the child
+# routes if they are not overwritten.
+route:
+  group_by: [cluster, alertname]
+  receiver: 'default-receiver'
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  # All alerts that do not match the following child routes
+  # will remain at the root node and be dispatched to 'default-receiver'.
+  routes:
+  - match:
+      severity: automated_recovery_attempt
+    receiver: 'dummy-receiver'
+
+receivers:
+- name: 'default-receiver'
+  email_configs:
+  - to: 'openshift-admins@cern.ch'
+    from: 'noreply@cern.ch'
+    smarthost: 'cernmx.cern.ch:25'
+    headers:
+      From: 'noreply@cern.ch'
+      Subject: '${MAIL_PREFIX}{{ template "email.default.subject" }}'
+
+- name: 'dummy-receiver'
+  email_configs:
+  - to: 'nowhere@cern.ch' #send an email into a black hole
