@@ -1,0 +1,9 @@
+alertManager:
+  resolveTimeout: 5m
+  groupWait: 30s
+  groupInterval: 5m
+  repeatInterval: 4h
+  emailConfig:
+    emailTo: 'openshift-admins@cern.ch'
+    emailFrom: 'noreply@cern.ch'
+    smartHost: 'cernmx.cern.ch:25'
