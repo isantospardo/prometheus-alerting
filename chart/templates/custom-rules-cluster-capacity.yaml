@@ -1,11 +1,9 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  creationTimestamp: null
   labels:
     role: alert-rules
   name: prometheus-cern-rules-cluster-capacity
-  namespace: openshift-monitoring
 spec:
   groups:
   - name: custom-cern-cluster-capacity.rules
