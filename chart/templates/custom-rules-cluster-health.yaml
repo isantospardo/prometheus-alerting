@@ -1,11 +1,9 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  creationTimestamp: null
   labels:
     role: alert-rules
   name: prometheus-cern-rules-cluster-health
-  namespace: openshift-monitoring
 spec:
   groups:
   - name: custom-cern-cluster-health.rules
@@ -67,33 +65,3 @@ spec:
           (ref. https://espace.cern.ch/openshift-internal/_layouts/15/WopiFrame.aspx?sourcedoc=%2Fopenshift%2Dinternal%2FShared%20Documents%2FOpenshift&wd=target%28%2F%2FOperations.one%7Cea9ca79c-7463-4279-8987-adf5800c34c1%2FAdd%5C%2FRemove%20nodes%7C9d4a5aef-baab-4fb3-b54a-5ccfe4e17387%2F%29)
         summary: The role {{`{{ $labels.label_role }}`}} is degraded as less than 90% of these nodes are in Ready
           state.
-
-    - alert: EosdIsUsingTooMuchMemory
-      expr: sum(container_memory_usage_bytes{id="/system.slice/eosd.service"}) by (instance) > 4*1024*1024*1024
-      for: 30m
-      labels:
-        severity: important
-      annotations:
-        description: The eosd process running in {{`{{ $labels.instance }}`}} is using more than 4GB of memory.
-          This is more than the reserved amount for this process, so this should not happen.
-        recovery_action: >
-          1. Connect to {{`{{ $labels.instance }}`}} and check if there are containers accessing EOS.
-          2. Analyze why EOS is using that much memory and if it is freeing up memory.
-          In the past, we have seen EOS memory leaks cause memory starvation. Contact EOS support is necessary.
-          3. Restart EOS on the node to free memory with `systemctl restart eosd`
-        summary: The eosd process running in {{`{{ $labels.instance }}`}} is using more than 4Gb of memory.
-
-    - alert: NodeStoppedPostingStatus
-      expr: count(kube_node_status_condition{condition="Ready",status="unknown"} == 1) by (node)
-      for: 0s # Trigger the alert immediately
-      labels:
-        # the alert for humans are nodes_in_not_ready_state if a significant fraction of nodes start being NotReady,
-        # openshift_standard_nodes_allocatable_* if too many nodes are NotReady to keep scheduling all apps.
-        severity: automated_recovery_attempt
-      annotations:
-        description: "{{`{{ $labels.node }}`}} stopped posting its status to the master. Possibly origin-node is broken
-          or did not detect it has been disconnected from its master, and simply needs to be restarted to recover the node.
-          But this must be done very quickly before pods are evacuated from the NotReady node and restarted elsewhere."
-        recovery_action: Run "systemctl restart origin-node" in {{`{{ $labels.node }}`}}.
-          This should be done programatically with an Ansible playbook.
-        summary: "{{`{{ $labels.node }}`}} is in NotReady state"
