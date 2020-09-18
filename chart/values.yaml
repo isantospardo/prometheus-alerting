@@ -4,10 +4,11 @@ alertManager:
   groupInterval: 5m
   repeatInterval: 4h
 
-  # alertManager will be configured to send email notifications only if this is set to true
+  # alertManager will be configured to send email notifications only
+  # if this is set to true
   enableEmailReceiver: false
 
   emailConfig:
     emailTo: '' # required: email address to send notifications to
-    emailFrom: 'noreply@cern.ch'
-    smartHost: 'cernmx.cern.ch:25'
+    emailFrom: '' # required: email sender address to send notifications
+    smartHost: '' # required: the SMTP host through which emails are sent
