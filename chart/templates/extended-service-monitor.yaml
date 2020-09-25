@@ -1,0 +1,8 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: extended-service-monitor
+spec:
+  endpoints:
+  - port: monitoring
+    interval: {{ .Values.metrics.scrapeInterval }}
