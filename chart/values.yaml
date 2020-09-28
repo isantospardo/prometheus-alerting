@@ -12,3 +12,4 @@ alertManager:
     emailTo: '' # required: email address to send notifications to
     emailFrom: '' # required: email sender address to send notifications
     smartHost: '' # required: the SMTP host through which emails are sent
+    emailNowhere: '' # required: black hole email address for known unnecessary alerts
